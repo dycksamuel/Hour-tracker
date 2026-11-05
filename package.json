@@ -1,0 +1,12 @@
+{
+  "name": "hour-tracker",
+  "private": true,
+  "type": "module",
+  "description": "Hours: a personal clock-in/clock-out web app for iPhone (served from docs/).",
+  "scripts": {
+    "test": "TZ=America/Toronto node --test tests/logic.test.mjs",
+    "test:e2e": "node tests/e2e.cjs",
+    "icons": "node tests/render-icons.cjs",
+    "serve": "python3 -m http.server 8080 --directory docs"
+  }
+}
