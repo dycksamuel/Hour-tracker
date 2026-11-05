@@ -158,3 +158,36 @@ test('picker: clock-out time must come after clock-in', () => {
   // Nothing fits (a time later than now today and before the clock-in yesterday) -> today, flagged by the UI
   assert.equal(dayKey(pickDay(days, 10 * 60, now, start)), '2026-11-05');
 });
+
+import { roundToQuarter, timesheet } from '../docs/js/logic.js';
+
+test('rounding to the nearest 15 minutes', () => {
+  const m = 60000;
+  // Started 9:00: left 5:56 -> 9h, left 5:48 -> 8h 45m
+  assert.equal(roundToQuarter(8 * H + 56 * m), 9 * H);
+  assert.equal(roundToQuarter(8 * H + 48 * m), 8.75 * H);
+  assert.equal(roundToQuarter(8 * H + 52 * m), 8.75 * H); // 7 min past the quarter rounds down
+  assert.equal(roundToQuarter(8 * H + 53 * m), 9 * H); // 8 min past rounds up
+  assert.equal(roundToQuarter(5 * m), 0);
+});
+
+test('rounded timesheet: each shift rounds and the totals add up', () => {
+  const [week] = groupByWeek(entries, at(2026, 11, 10));
+  const sheet = timesheet(week, at(2026, 11, 10), true);
+  // Tue: 7h15 stays 7.25; 2h34 -> 2.5; day 9.75
+  const tue = sheet.days[1];
+  assert.deepEqual(tue.entries.map((x) => decimalHours(x.ms)), ['7.25', '2.5']);
+  assert.equal(decimalHours(tue.total), '9.75');
+  assert.equal(sheet.total, sheet.days.reduce((s, d) => s + d.total, 0));
+  assert.equal(decimalHours(sheet.total), '21'); // 7.25 + 9.75 + 4
+
+  const csv = weeksToCSV([week], jobs, at(2026, 11, 10), { round: true });
+  assert.ok(csv.includes('2026-11-03,Tue,Church,6:01 PM,8:35 PM,2.5,"Youth ""night"""'));
+  assert.ok(csv.includes(',,,,Day total (Tue Nov 3),9.75,'));
+  assert.ok(csv.includes('"Week total (Nov 2 – Nov 8, 2026)",21,'));
+  assert.ok(csv.includes('Hours are rounded to the nearest 15 minutes.'));
+
+  const text = weekToText(week, jobs, { now: at(2026, 11, 10), round: true });
+  assert.match(text, /6:01 PM – 8:35 PM {3}2\.5h/);
+  assert.match(text, /Week total: 21h\n\(Hours are rounded to the nearest 15 minutes\.\)$/);
+});

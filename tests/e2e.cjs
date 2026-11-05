@@ -211,16 +211,20 @@ async function seededFlow(browser, colorScheme) {
     assert.equal(download.suggestedFilename(), 'hours-week-of-2026-11-02.csv');
     const csv = fs.readFileSync(await download.path(), 'utf8');
     fs.writeFileSync(path.join(SHOTS, 'sample-week.csv'), csv);
-    assert.match(csv, /2026-11-03,Tue,Church,6:01 PM,8:35 PM,2.57,Youth night/);
-    assert.match(csv, /,,,,Day total \(Tue Nov 3\),9.82,/);
-    assert.match(csv, /Week total \(Nov 2 – Nov 8, 2026\)",22.7,/);
+    // Exports round each shift to the nearest 15 minutes (on by default)
+    assert.match(csv, /2026-11-03,Tue,Church,6:01 PM,8:35 PM,2.5,Youth night/);
+    assert.match(csv, /2026-11-04,Wed,Church,9:33 AM,10:29 AM,1,/);
+    assert.match(csv, /,,,,Day total \(Tue Nov 3\),9.75,/);
+    assert.match(csv, /Week total \(Nov 2 – Nov 8, 2026\)",22.75,/);
+    assert.match(csv, /Hours are rounded to the nearest 15 minutes\./);
+    assert.equal(await page.locator('.export-note .rounded-total').textContent(), '22.75h');
 
     // Print view renders the report
     await page.evaluate(() => {
       window.print = () => {};
     });
     await page.getByRole('button', { name: 'Print / PDF' }).click();
-    assert.match(await page.locator('#print-root').textContent(), /Week total: 22.7h/);
+    assert.match(await page.locator('#print-root').textContent(), /Week total: 22.75h/);
     await page.emulateMedia({ media: 'print' });
     await page.pdf({ path: path.join(SHOTS, 'sample-week.pdf'), format: 'Letter', margin: { top: '0.6in', bottom: '0.6in', left: '0.6in', right: '0.6in' } }).catch(() => {});
     await page.emulateMedia({ media: 'screen' });
@@ -238,6 +242,15 @@ async function seededFlow(browser, colorScheme) {
     await page.getByRole('button', { name: /Hours & min/ }).click();
     await page.locator('.tabbar [data-tab="clock"]').click();
     assert.match(await page.locator('.job.is-on .stats b').first().textContent(), /^1h 12m$/);
+
+    // Rounding can be turned off for exact exports
+    await page.locator('.tabbar [data-tab="settings"]').click();
+    await page.locator('input[data-action="round-toggle"]').click();
+    const [exact] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Export all shifts/ }).click()]);
+    const exactCsv = fs.readFileSync(await exact.path(), 'utf8');
+    assert.match(exactCsv, /6:01 PM,8:35 PM,2.57,Youth night/);
+    assert.doesNotMatch(exactCsv, /rounded/);
+    await page.locator('input[data-action="round-toggle"]').click();
 
     // Backup downloads valid JSON
     await page.locator('.tabbar [data-tab="settings"]').click();

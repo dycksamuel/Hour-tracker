@@ -156,24 +156,49 @@ function csvCell(v) {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+const QUARTER_MS = 15 * 60000;
+
+/** Round a duration to the nearest 15 minutes (8 min or more rounds up). */
+export function roundToQuarter(ms) {
+  return Math.round(ms / QUARTER_MS) * QUARTER_MS;
+}
+
+/**
+ * The hours a timesheet shows for one week. With `round`, each shift is rounded to the nearest
+ * 15 minutes and the day/week totals add up those rounded shifts, so the sheet always adds up.
+ * Returns { weekStart, total, byJob, days: [{ dayStart, total, entries: [{ entry, ms }] }] }.
+ */
+export function timesheet(week, now, round = false) {
+  const dur = (e) => (round ? roundToQuarter(entryDuration(e, now)) : entryDuration(e, now));
+  const byJob = {};
+  const days = week.days.map((d) => {
+    const entries = d.entries.map((entry) => ({ entry, ms: dur(entry) }));
+    for (const x of entries) byJob[x.entry.jobId] = (byJob[x.entry.jobId] || 0) + x.ms;
+    return { dayStart: d.dayStart, entries, total: entries.reduce((sum, x) => sum + x.ms, 0) };
+  });
+  return { weekStart: week.weekStart, days, byJob, total: days.reduce((sum, d) => sum + d.total, 0) };
+}
+
+export const ROUNDING_NOTE = 'Hours are rounded to the nearest 15 minutes.';
+
 /**
  * CSV with one row per shift, plus a total row after each day and each week.
  * `weeks` is the output of groupByWeek (any order; exported oldest first).
  */
-export function weeksToCSV(weeks, jobsById, now) {
+export function weeksToCSV(weeks, jobsById, now, { round = false } = {}) {
   const rows = [['Date', 'Day', 'Job', 'Clock In', 'Clock Out', 'Hours', 'Note']];
   const ordered = [...weeks].sort((a, b) => a.weekStart - b.weekStart);
-  for (const week of ordered) {
+  for (const week of ordered.map((w) => timesheet(w, now, round))) {
     for (const day of week.days) {
       const d = new Date(day.dayStart);
-      for (const e of day.entries) {
+      for (const { entry: e, ms } of day.entries) {
         rows.push([
           dayKey(day.dayStart),
           d.toLocaleDateString('en-US', { weekday: 'short' }),
           jobsById[e.jobId]?.name ?? '',
           formatTime(e.start),
           e.end == null ? 'still clocked in' : formatTime(e.end),
-          decimalHours(entryDuration(e, now)),
+          decimalHours(ms),
           e.note || '',
         ]);
       }
@@ -182,32 +207,35 @@ export function weeksToCSV(weeks, jobsById, now) {
     rows.push(['', '', '', '', `Week total (${formatWeekRange(week.weekStart)})`, decimalHours(week.total), '']);
     rows.push([]);
   }
+  if (round) rows.push([ROUNDING_NOTE]);
   // Leading BOM so Excel opens the file as UTF-8.
-  return '\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  return '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
 /** Plain-text summary for pasting into a message or email. */
-export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = false, title = '' } = {}) {
+export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = false, title = '', round = false } = {}) {
   const fh = (ms) => formatHours(ms, mode);
+  const sheet = timesheet(week, now, round);
   const lines = [];
   lines.push(`${title ? `${title} — ` : ''}${formatWeekRange(week.weekStart)}`);
   lines.push('');
-  for (const day of week.days) {
+  for (const day of sheet.days) {
     lines.push(`${formatDay(day.dayStart)}  (${fh(day.total)})`);
-    for (const e of day.entries) {
+    for (const { entry: e, ms } of day.entries) {
       const end = e.end == null ? 'now' : formatTime(e.end);
       const job = showJob ? `  [${jobsById[e.jobId]?.name ?? ''}]` : '';
       const note = e.note ? `  – ${e.note}` : '';
-      lines.push(`  ${formatTime(e.start)} – ${end}   ${fh(entryDuration(e, now))}${job}${note}`);
+      lines.push(`  ${formatTime(e.start)} – ${end}   ${fh(ms)}${job}${note}`);
     }
   }
   lines.push('');
-  if (showJob && Object.keys(week.byJob).length > 1) {
-    for (const [jobId, ms] of Object.entries(week.byJob)) {
+  if (showJob && Object.keys(sheet.byJob).length > 1) {
+    for (const [jobId, ms] of Object.entries(sheet.byJob)) {
       lines.push(`${jobsById[jobId]?.name ?? 'Job'}: ${fh(ms)}`);
     }
   }
-  lines.push(`Week total: ${fh(week.total)}`);
+  lines.push(`Week total: ${fh(sheet.total)}`);
+  if (round) lines.push(`(${ROUNDING_NOTE})`);
   return lines.join('\n');
 }
 

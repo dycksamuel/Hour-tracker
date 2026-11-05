@@ -9,7 +9,7 @@ export function emptyState() {
     version: 1,
     jobs: [], // { id, name, color, createdAt }
     entries: [], // { id, jobId, start, end|null, note }
-    settings: { hoursFormat: 'decimal', badge: false },
+    settings: { hoursFormat: 'decimal', badge: false, roundExports: true },
   };
 }
 

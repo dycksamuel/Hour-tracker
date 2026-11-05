@@ -17,11 +17,13 @@ import {
   toDateTimeLocal,
   totalBetween,
   weeksToCSV,
+  timesheet,
+  ROUNDING_NOTE,
   weekToText,
 } from './logic.js';
 import { JOB_COLORS, load, normalize, save, uid } from './store.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const LONG_SHIFT_MS = 12 * 3600000;
 
 let state = load();
@@ -321,6 +323,11 @@ function renderWeekDetail() {
         <button class="btn tinted" data-action="share-csv">Spreadsheet (CSV)</button>
         <button class="btn tinted" data-action="print-week">Print / PDF</button>
       </div>
+      ${
+        state.settings.roundExports
+          ? `<p class="export-note">Timesheet total: <b class="rounded-total">${fh(timesheet(week, t, true).total)}</b> · each shift rounded to the nearest 15 minutes</p>`
+          : ''
+      }
     </section>
     <button class="btn tinted block" data-action="add-entry" data-week="${ws}">+ Add a shift to this week</button>`;
 }
@@ -361,6 +368,17 @@ function renderSettings() {
       <button aria-selected="${state.settings.hoursFormat === 'decimal'}" data-action="hours-format" data-value="decimal">Decimal (7.25h)</button>
       <button aria-selected="${state.settings.hoursFormat === 'hm'}" data-action="hours-format" data-value="hm">Hours &amp; min (7h 15m)</button>
     </div>
+
+    <h3 class="section-label">Timesheets</h3>
+    <section class="card list">
+      <label class="row toggle">
+        <span class="row-main">
+          <span class="row-title">Round to the nearest 15 minutes</span>
+          <span class="row-sub">Exports (text, CSV, PDF) round each shift's hours, so 8h 56m becomes 9h and 8h 48m becomes 8h 45m. Clock-in and clock-out times stay exact, and the app itself shows your exact hours.</span>
+        </span>
+        <input type="checkbox" class="switch" data-action="round-toggle" ${state.settings.roundExports ? 'checked' : ''}>
+      </label>
+    </section>
 
     <h3 class="section-label">App icon</h3>
     <section class="card list">
@@ -752,6 +770,7 @@ function shareWeekText() {
     mode: state.settings.hoursFormat,
     showJob: multiJob() && ui.weekFilter === 'all',
     title: exportTitle(),
+    round: state.settings.roundExports,
   });
   if (navigator.share) {
     navigator.share({ text }).catch((err) => {
@@ -772,24 +791,25 @@ function copyText(text) {
 function shareWeekCSV() {
   const t = now();
   const week = currentWeekData(t);
-  shareFile(`${fileStem(week.weekStart)}.csv`, 'text/csv', weeksToCSV([week], jobsById(), t));
+  shareFile(`${fileStem(week.weekStart)}.csv`, 'text/csv', weeksToCSV([week], jobsById(), t, { round: state.settings.roundExports }));
 }
 
 function printWeek() {
   const t = now();
-  const week = currentWeekData(t);
+  const round = state.settings.roundExports;
+  const week = timesheet(currentWeekData(t), t, round);
   const showJob = multiJob() && ui.weekFilter === 'all';
   const title = exportTitle();
   const rows = week.days
     .map((d) => {
       const shiftRows = d.entries
         .map(
-          (e, i) => `<tr>
+          ({ entry: e, ms }, i) => `<tr>
             <td>${i === 0 ? esc(formatDay(d.dayStart)) : ''}</td>
             ${showJob ? `<td>${esc(jobById(e.jobId)?.name || '')}</td>` : ''}
             <td>${esc(formatTime(e.start))}</td>
             <td>${e.end == null ? 'still clocked in' : esc(formatTime(e.end))}</td>
-            <td class="num">${fh(entryDuration(e, t))}</td>
+            <td class="num">${fh(ms)}</td>
             <td>${esc(e.note || '')}</td>
           </tr>`,
         )
@@ -810,6 +830,7 @@ function printWeek() {
     </table>
     ${byJob}
     <p class="week-total">Week total: <b>${fh(week.total)}</b></p>
+    ${round ? `<p class="rounding-note">${ROUNDING_NOTE}</p>` : ''}
   </div>`;
   window.print();
 }
@@ -818,7 +839,7 @@ function exportAllCSV() {
   const t = now();
   const weeks = groupByWeek(state.entries, t);
   if (!weeks.length) return showToast('No shifts to export yet');
-  shareFile(`hours-all-${dayKey(t)}.csv`, 'text/csv', weeksToCSV(weeks, jobsById(), t));
+  shareFile(`hours-all-${dayKey(t)}.csv`, 'text/csv', weeksToCSV(weeks, jobsById(), t, { round: state.settings.roundExports }));
 }
 
 function backup() {
@@ -1002,6 +1023,11 @@ document.addEventListener('change', (ev) => {
   const el = ev.target;
   if (el.dataset.action === 'restore') return restore(el);
   if (el.dataset.action === 'badge-toggle') return toggleBadge(el);
+  if (el.dataset.action === 'round-toggle') {
+    return commit((s) => {
+      s.settings.roundExports = el.checked;
+    });
+  }
   if (el.name === 'active' && el.form?.dataset.form === 'entry') {
     el.form.querySelector('.end-field').hidden = el.checked;
   }

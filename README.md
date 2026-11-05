@@ -11,6 +11,7 @@
 - **Up to a few jobs** (for example Church and a second job), each with its own color and clock. Pay Periods can show all jobs or one at a time.
 - **Fix mistakes.** Change the clock-in or clock-out time, add a shift you forgot, add a note, or delete a shift.
 - **Export a week** as text (for Messages or email), as a CSV spreadsheet, or as a printable page or PDF. **Export everything** as CSV.
+- **Clean timesheets.** Exports round each shift to the nearest 15 minutes (8h 56m → 9h, 8h 48m → 8h 45m), and the day and week totals add up those rounded shifts. Clock-in/out times stay exact, the app itself shows exact hours, and rounding can be turned off in Settings.
 - **Back up and restore** all your data as a file (keep a copy in iCloud Drive).
 - **Optional app-icon badge** while you're clocked in, so you notice if you forgot to clock out.
 - **Works offline** and supports dark mode. Your data stays on your phone.
