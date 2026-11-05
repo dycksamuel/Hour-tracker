@@ -130,3 +130,31 @@ test('store: unreadable data is kept aside, not overwritten', () => {
   save({ ...s, jobs: [{ id: 'a', name: 'X', color: '#000', createdAt: 1 }] }, storage);
   assert.equal(load(storage).jobs[0].name, 'X');
 });
+
+import { atMinuteOfDay, pickDay, recentDays } from '../docs/js/logic.js';
+
+test('picker: a picked time means the most recent time it already happened', () => {
+  const now = at(2026, 11, 5, 8, 30);
+  const days = recentDays(now, addDays(now, -2), 3);
+  assert.deepEqual(days.map(dayKey), ['2026-11-05', '2026-11-04', '2026-11-03']);
+  // 8:00 AM at 8:30 AM -> today
+  assert.equal(dayKey(pickDay(days, 8 * 60, now)), '2026-11-05');
+  // 11:00 PM at 12:30 AM -> last night
+  const lateNow = at(2026, 11, 6, 0, 30);
+  const lateDays = recentDays(lateNow, addDays(lateNow, -2), 3);
+  assert.equal(dayKey(pickDay(lateDays, 23 * 60, lateNow)), '2026-11-05');
+  assert.equal(atMinuteOfDay(at(2026, 11, 5), 8 * 60 + 5), at(2026, 11, 5, 8, 5));
+});
+
+test('picker: clock-out time must come after clock-in', () => {
+  // Clocked in Wed 6 PM, realizing at Thu 9 AM that you left at 11 PM -> Wednesday
+  const start = at(2026, 11, 4, 18, 0);
+  const now = at(2026, 11, 5, 9, 0);
+  const days = recentDays(now, start, 7);
+  assert.deepEqual(days.map(dayKey), ['2026-11-05', '2026-11-04']);
+  assert.equal(dayKey(pickDay(days, 23 * 60, now, start)), '2026-11-04');
+  // Left at 1 AM -> Thursday morning
+  assert.equal(dayKey(pickDay(days, 60, now, start)), '2026-11-05');
+  // Nothing fits (a time later than now today and before the clock-in yesterday) -> today, flagged by the UI
+  assert.equal(dayKey(pickDay(days, 10 * 60, now, start)), '2026-11-05');
+});

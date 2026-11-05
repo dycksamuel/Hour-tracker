@@ -1,5 +1,8 @@
 import {
   addDays,
+  atMinuteOfDay,
+  pickDay,
+  recentDays,
   dayKey,
   entryDuration,
   formatDay,
@@ -18,7 +21,7 @@ import {
 } from './logic.js';
 import { JOB_COLORS, load, normalize, save, uid } from './store.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const LONG_SHIFT_MS = 12 * 3600000;
 
 let state = load();
@@ -142,20 +145,25 @@ function renderClock() {
           a
             ? `<div class="timer" data-elapsed="${a.start}">${formatElapsed(t - a.start)}</div>
                <div class="since">since ${formatTime(a.start)}${otherDay ? ` on ${formatDay(a.start)}` : ''}</div>`
-            : `<div class="timer idle">0:00:00</div><div class="since">Tap Clock In when you start</div>`
+            : `<div class="timer idle">0:00:00</div><div class="since">Off the clock</div>`
         }
         ${
           long
             ? `<div class="warn" role="alert">You've been clocked in for more than 12 hours. Forgot to clock out?
-                 <button class="link-btn" data-action="edit-entry" data-id="${a.id}">Fix the time</button></div>`
+                 <button class="link-btn" data-action="clock-out-at" data-job="${esc(job.id)}">Clock out at the right time</button></div>`
             : ''
         }
-        <button class="btn big ${a ? 'out' : 'in'}" data-action="${a ? 'clock-out' : 'clock-in'}" data-job="${esc(job.id)}">
-          ${a ? 'Clock Out' : 'Clock In'}
-        </button>
+        <div class="clock-buttons">
+          <button class="btn big ${a ? 'out' : 'in'}" data-action="${a ? 'clock-out' : 'clock-in'}" data-job="${esc(job.id)}">
+            ${a ? 'Clock Out Now' : 'Clock In Now'}
+          </button>
+          <button class="btn big ${a ? 'out' : 'in'} alt" data-action="${a ? 'clock-out-at' : 'clock-in-at'}" data-job="${esc(job.id)}">
+            ${a ? 'Clock Out At…' : 'Clock In At…'}
+          </button>
+        </div>
         ${
           a
-            ? `<button class="link-btn center" data-action="edit-entry" data-id="${a.id}">Adjust clock-in or clock-out time</button>`
+            ? `<button class="link-btn center" data-action="edit-entry" data-id="${a.id}">Change clock-in time</button>`
             : ''
         }
         <div class="stats">
@@ -427,6 +435,7 @@ function openSheet(html) {
 }
 
 function closeSheet() {
+  picker = null;
   const root = $('#sheet-root');
   root.classList.remove('open');
   sheetOpen = false;
@@ -477,6 +486,152 @@ function openEntrySheet(entryId, weekStart) {
       ${e ? `<button type="button" class="link-btn danger center" data-action="delete-entry" data-id="${e.id}">Delete this shift</button>` : ''}
     </form>`);
 }
+
+// ---------- clock in/out at a different time ----------
+
+const WHEEL_ITEM = 44;
+const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+let picker = null; // { mode: 'in'|'out', jobId, entryId, after, days, day, dayTouched, minutes }
+
+function wheelColumn(col, labels, index) {
+  return `<div class="wheel-col" data-col="${col}" aria-label="${col}" tabindex="0">
+    ${labels.map((l, i) => `<button type="button" class="wheel-item ${i === index ? 'sel' : ''}" data-action="wheel-pick" data-index="${i}" tabindex="-1">${l}</button>`).join('')}
+  </div>`;
+}
+
+function openClockAt(mode, jobId) {
+  const job = jobById(jobId);
+  if (!job) return;
+  const t = now();
+  const active = activeEntry(jobId);
+  if (mode === 'out' && !active) return;
+  if (mode === 'in' && active) return;
+  const after = mode === 'out' ? active.start : -Infinity;
+  const days = mode === 'out' ? recentDays(t, active.start, 7) : recentDays(t, addDays(t, -2), 3);
+  const d = new Date(t);
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  picker = { mode, jobId, entryId: active?.id, after, days, day: pickDay(days, minutes, t, after), dayTouched: false, minutes };
+
+  const h = Math.floor(minutes / 60);
+  const verb = mode === 'in' ? 'Clock in' : 'Clock out';
+  const dayLabel = (ds, i) => (i === 0 ? 'Today' : i === 1 ? 'Yesterday' : new Date(ds).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }));
+  openSheet(`<form data-form="clock-at" class="stack picker ${mode}" style="--job:${esc(job.color)}">
+      <h2>${verb}${multiJob() ? ` of ${esc(job.name)}` : ''} at…</h2>
+      <p class="picker-hint">${mode === 'in' ? 'Scroll to the time you actually started.' : `Scroll to the time you actually left. You clocked in at ${esc(formatTime(active.start))}${startOfDay(active.start) !== startOfDay(t) ? ` on ${esc(formatDay(active.start))}` : ''}.`}</p>
+      <div class="wheel">
+        <div class="wheel-band" aria-hidden="true"></div>
+        ${wheelColumn('hour', HOURS, h % 12)}
+        ${wheelColumn('minute', Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')), minutes % 60)}
+        ${wheelColumn('ampm', ['AM', 'PM'], h >= 12 ? 1 : 0)}
+      </div>
+      ${
+        days.length > 1
+          ? `<div class="segmented days">${days
+              .map((ds, i) => `<button type="button" data-action="pick-day" data-day="${ds}" aria-selected="false">${esc(dayLabel(ds, i))}</button>`)
+              .join('')}</div>`
+          : ''
+      }
+      <p class="picker-summary" aria-live="polite"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn" data-action="close-sheet">Cancel</button>
+        <button type="submit" class="btn primary confirm"></button>
+      </div>
+    </form>`);
+  // Put each wheel on the current time once the sheet is laid out.
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#sheet-root .wheel-col').forEach((col) => {
+      const sel = col.querySelector('.sel');
+      col.scrollTop = Number(sel.dataset.index) * WHEEL_ITEM;
+    });
+    updatePicker();
+  });
+}
+
+function readWheel(col) {
+  const el = document.querySelector(`#sheet-root .wheel-col[data-col="${col}"]`);
+  const n = el.children.length;
+  const i = Math.min(n - 1, Math.max(0, Math.round(el.scrollTop / WHEEL_ITEM)));
+  el.querySelectorAll('.wheel-item').forEach((it, j) => it.classList.toggle('sel', i === j));
+  return i;
+}
+
+/** The picked moment and whether it can be saved. */
+function pickerResult() {
+  const t = now();
+  const at = atMinuteOfDay(picker.day, picker.minutes);
+  let error = '';
+  if (at > t) error = "That time hasn't happened yet.";
+  else if (picker.mode === 'out' && at <= picker.after) error = `That's before you clocked in (${formatTime(picker.after)}).`;
+  else if (picker.mode === 'in') {
+    const lastEnd = Math.max(-Infinity, ...state.entries.filter((e) => e.jobId === picker.jobId && e.end != null && e.start < at).map((e) => e.end));
+    if (lastEnd > at) error = `That overlaps your last shift, which ended at ${formatTime(lastEnd)}${startOfDay(lastEnd) !== startOfDay(t) ? ` on ${formatDay(lastEnd)}` : ''}.`;
+  }
+  return { at, error, t };
+}
+
+function updatePicker() {
+  if (!picker) return;
+  const hourIdx = readWheel('hour');
+  const minute = readWheel('minute');
+  const pm = readWheel('ampm') === 1;
+  picker.minutes = ((HOURS[hourIdx] % 12) + (pm ? 12 : 0)) * 60 + minute;
+  if (!picker.dayTouched) picker.day = pickDay(picker.days, picker.minutes, now(), picker.after);
+  document.querySelectorAll('#sheet-root [data-action="pick-day"]').forEach((b) => b.setAttribute('aria-selected', String(Number(b.dataset.day) === picker.day)));
+
+  const { at, error, t } = pickerResult();
+  const idx = picker.days.indexOf(picker.day);
+  const when = idx === 0 ? 'today' : idx === 1 ? 'yesterday' : `on ${formatDay(at)}`;
+  let summary;
+  if (error) summary = error;
+  else if (picker.mode === 'in') summary = `Clocking in at ${formatTime(at)} ${when} · ${formatHours(entryDuration({ start: at, end: t }), 'hm')} ago`;
+  else summary = `Shift: ${formatTime(picker.after)} – ${formatTime(at)} ${when} · ${fh(entryDuration({ start: picker.after, end: at }))}`;
+  const sum = $('#sheet-root .picker-summary');
+  sum.textContent = summary;
+  sum.classList.toggle('error', !!error);
+  const btn = $('#sheet-root .confirm');
+  btn.textContent = `${picker.mode === 'in' ? 'Clock In' : 'Clock Out'} at ${formatTime(at)}`;
+  btn.disabled = !!error;
+}
+
+function confirmClockAt() {
+  if (!picker) return;
+  updatePicker();
+  const { at, error } = pickerResult();
+  if (error) return;
+  const { mode, jobId, entryId } = picker;
+  closeSheet();
+  if (mode === 'in') {
+    if (activeEntry(jobId)) return;
+    const entry = { id: uid(), jobId, start: at, end: null, note: '' };
+    commit((s) => s.entries.push(entry));
+    showToast(`Clocked in at ${formatTime(at)}`, () =>
+      commit((s) => {
+        s.entries = s.entries.filter((e) => e.id !== entry.id);
+      }),
+    );
+  } else {
+    const e = state.entries.find((x) => x.id === entryId);
+    if (!e || e.end != null) return;
+    commit((s) => {
+      s.entries.find((x) => x.id === entryId).end = at;
+    });
+    showToast(`Clocked out at ${formatTime(at)} · ${fh(entryDuration({ start: e.start, end: at }))}`, () =>
+      commit((s) => {
+        const x = s.entries.find((y) => y.id === entryId);
+        if (x) x.end = null;
+      }),
+    );
+  }
+}
+
+// Wheel scrolling (scroll events don't bubble, so listen in the capture phase).
+document.addEventListener(
+  'scroll',
+  (ev) => {
+    if (picker && ev.target.classList?.contains('wheel-col')) updatePicker();
+  },
+  true,
+);
 
 /** Keep the original seconds when the user didn't change that minute. */
 function keepSeconds(original, edited) {
@@ -751,6 +906,20 @@ document.addEventListener('click', (ev) => {
       return clockIn(el.dataset.job);
     case 'clock-out':
       return clockOut(el.dataset.job);
+    case 'clock-in-at':
+      return openClockAt('in', el.dataset.job);
+    case 'clock-out-at':
+      return openClockAt('out', el.dataset.job);
+    case 'wheel-pick': {
+      const col = el.closest('.wheel-col');
+      col.scrollTo({ top: Number(el.dataset.index) * WHEEL_ITEM, behavior: 'smooth' });
+      return;
+    }
+    case 'pick-day':
+      picker.day = Number(el.dataset.day);
+      picker.dayTouched = true;
+      updatePicker();
+      return;
     case 'edit-entry':
       return openEntrySheet(el.dataset.id);
     case 'add-entry':
@@ -851,10 +1020,18 @@ document.addEventListener('submit', (ev) => {
       return saveEntry(form);
     case 'job':
       return saveJob(form);
+    case 'clock-at':
+      return confirmClockAt();
   }
 });
 
 document.addEventListener('keydown', (ev) => {
+  const col = ev.target.closest?.('.wheel-col');
+  if (col && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+    ev.preventDefault();
+    col.scrollBy({ top: ev.key === 'ArrowUp' ? -WHEEL_ITEM : WHEEL_ITEM });
+    return;
+  }
   if (ev.key === 'Escape' && sheetOpen) closeSheet();
 });
 

@@ -62,11 +62,11 @@ async function freshFlow(browser) {
   await page.getByPlaceholder('Job name, e.g. Church').fill('Church');
   await shot(page, '01-welcome');
   await page.getByRole('button', { name: 'Add job' }).click();
-  await page.getByRole('button', { name: 'Clock In', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Clock In Now', exact: true }).waitFor();
   assert.equal(await page.locator('.pill').textContent(), 'Off the clock');
 
   // Clock in: uses the current time automatically
-  await page.getByRole('button', { name: 'Clock In', exact: true }).click();
+  await page.getByRole('button', { name: 'Clock In Now', exact: true }).click();
   await page.locator('#toast.show').waitFor();
   assert.match(await page.locator('#toast').textContent(), /Clocked in at 9:07 AM/);
   assert.equal(await page.locator('.pill').textContent(), 'On the clock');
@@ -86,7 +86,7 @@ async function freshFlow(browser) {
 
   // Clock out at 4:21 PM
   await page.clock.setSystemTime(at(2026, 11, 5, 16, 21));
-  await page.getByRole('button', { name: 'Clock Out', exact: true }).click();
+  await page.getByRole('button', { name: 'Clock Out Now', exact: true }).click();
   assert.match(await page.locator('#toast').textContent(), /Clocked out at 4:21 PM · 7.23h/);
   assert.equal(await page.locator('.pill').textContent(), 'Off the clock');
   assert.match(await page.locator('.card.list').textContent(), /9:07 AM – 4:21 PM/);
@@ -94,7 +94,7 @@ async function freshFlow(browser) {
   // Undo the clock-out, then clock out again
   await page.getByRole('button', { name: 'Undo' }).click();
   assert.equal(await page.locator('.pill').textContent(), 'On the clock');
-  await page.getByRole('button', { name: 'Clock Out', exact: true }).click();
+  await page.getByRole('button', { name: 'Clock Out Now', exact: true }).click();
   await shot(page, '03-clocked-out');
 
   // Edit the shift: change clock-in to 9:06
@@ -130,7 +130,7 @@ async function freshFlow(browser) {
   await page.waitForFunction(() => navigator.serviceWorker?.controller);
   await context.setOffline(true);
   await page.reload();
-  await page.getByRole('button', { name: 'Clock In', exact: true }).first().waitFor();
+  await page.getByRole('button', { name: 'Clock In Now', exact: true }).first().waitFor();
   await context.setOffline(false);
 
   assert.deepEqual(errors, []);
@@ -251,6 +251,110 @@ async function seededFlow(browser, colorScheme) {
   console.log(`✓ seeded flow (${colorScheme || 'light'}): pay periods, week detail, totals, filter, CSV, print, backup`);
 }
 
+async function setWheel(page, col, index) {
+  await page.$eval(
+    `#sheet-root .wheel-col[data-col="${col}"]`,
+    (el, i) => {
+      el.scrollTop = i * 44;
+      el.dispatchEvent(new Event('scroll'));
+    },
+    index,
+  );
+}
+
+async function setPickerTime(page, hour12, minute, pm) {
+  await setWheel(page, 'hour', hour12 % 12); // wheel order is 12, 1, 2 … 11
+  await setWheel(page, 'minute', minute);
+  await setWheel(page, 'ampm', pm ? 1 : 0);
+}
+
+async function pickerFlow(browser) {
+  const context = await browser.newContext(phone);
+  const page = await context.newPage();
+  const errors = [];
+  watchErrors(page, errors);
+  // You got to work at 8:00 but only remember to clock in at 8:30
+  await page.clock.install({ time: at(2026, 11, 5, 8, 30) });
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('hourtracker.v1')) {
+      localStorage.setItem('hourtracker.v1', JSON.stringify({ version: 1, jobs: [{ id: 'church', name: 'Church', color: '#2f7cf6', createdAt: 1 }], entries: [], settings: {} }));
+    }
+  });
+  await page.goto(url);
+  await shot(page, '10-clock-buttons');
+
+  const summary = page.locator('#sheet-root .picker-summary');
+  const confirm = page.locator('#sheet-root .confirm');
+
+  await page.getByRole('button', { name: 'Clock In At…' }).click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  await page.waitForFunction(() => document.querySelector('#sheet-root .confirm')?.textContent);
+  assert.equal(await confirm.textContent(), 'Clock In at 8:30 AM'); // starts on the current time
+  await setPickerTime(page, 8, 0, false);
+  assert.equal(await confirm.textContent(), 'Clock In at 8:00 AM');
+  assert.equal(await summary.textContent(), 'Clocking in at 8:00 AM today · 30m ago');
+  await shot(page, '11-clock-in-at');
+
+  // 9:00 AM hasn't happened today, so it assumes yesterday; forcing "Today" is refused
+  await setPickerTime(page, 9, 0, false);
+  assert.match(await summary.textContent(), /9:00 AM yesterday/);
+  await page.locator('#sheet-root [data-action="pick-day"]', { hasText: 'Today' }).click();
+  assert.equal(await summary.textContent(), "That time hasn't happened yet.");
+  assert.equal(await confirm.isDisabled(), true);
+  await setPickerTime(page, 8, 0, false);
+  assert.equal(await confirm.isDisabled(), false);
+  await confirm.click();
+  assert.match(await page.locator('#toast').textContent(), /Clocked in at 8:00 AM/);
+  assert.match(await page.locator('.since').textContent(), /since 8:00 AM/);
+  await page.clock.runFor(1500);
+  assert.match(await page.locator('.timer').textContent(), /^0:30:0\d$/);
+
+  // You left at 4:30 PM but only notice at home at 6:00 PM
+  await page.clock.setSystemTime(at(2026, 11, 5, 18, 0));
+  await page.getByRole('button', { name: 'Clock Out At…' }).click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  await page.waitForFunction(() => document.querySelector('#sheet-root .confirm')?.textContent);
+  assert.equal(await confirm.textContent(), 'Clock Out at 6:00 PM'); // opens on the current time, not the clock-in time
+  await setPickerTime(page, 4, 30, true);
+  assert.equal(await summary.textContent(), 'Shift: 8:00 AM – 4:30 PM today · 8.5h');
+  await shot(page, '12-clock-out-at');
+  // A time before the clock-in is refused
+  await setPickerTime(page, 7, 0, false);
+  assert.equal(await summary.textContent(), 'That\'s before you clocked in (8:00 AM).');
+  await setPickerTime(page, 4, 30, true);
+  await confirm.click();
+  assert.match(await page.locator('#toast').textContent(), /Clocked out at 4:30 PM · 8.5h/);
+  assert.match(await page.locator('.card.list').textContent(), /8:00 AM – 4:30 PM\s*8.5h/);
+
+  // Clocking in during a shift you already logged is refused
+  await page.getByRole('button', { name: 'Clock In At…' }).click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  await setPickerTime(page, 4, 0, true);
+  assert.equal(await summary.textContent(), 'That overlaps your last shift, which ended at 4:30 PM.');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  // Just after midnight: clock in at 11 PM means last night
+  await page.clock.setSystemTime(at(2026, 11, 6, 0, 30));
+  await page.reload();
+  await page.getByRole('button', { name: 'Clock In At…' }).click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  await setPickerTime(page, 11, 0, true);
+  assert.equal(await summary.textContent(), 'Clocking in at 11:00 PM yesterday · 1h 30m ago');
+  await confirm.click();
+  assert.match(await page.locator('.since').textContent(), /since 11:00 PM on Thu Nov 5/);
+
+  // Tapping a number on the wheel scrolls to it
+  await page.getByRole('button', { name: 'Clock Out At…' }).click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  await page.locator('#sheet-root .wheel-col[data-col="minute"] .wheel-item').nth(31).click();
+  await page.waitForFunction(() => document.querySelector('#sheet-root .confirm').textContent.endsWith(':31 AM'));
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  assert.deepEqual(errors, []);
+  await context.close();
+  console.log('✓ clock in/out at a different time: wheel, auto day, validation, overlap, overnight');
+}
+
 (async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
   const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', ROOT], { stdio: 'ignore' });
@@ -259,6 +363,7 @@ async function seededFlow(browser, colorScheme) {
     await waitForServer();
     const browser = await chromium.launch();
     await freshFlow(browser);
+    await pickerFlow(browser);
     await seededFlow(browser, 'light');
     await seededFlow(browser, 'dark');
     await browser.close();

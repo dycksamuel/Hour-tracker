@@ -210,3 +210,31 @@ export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = fa
   lines.push(`Week total: ${fh(week.total)}`);
   return lines.join('\n');
 }
+
+// ---------- "Clock in/out at…" time picker ----------
+
+/** The moment `minutes` after midnight (0–1439) on the calendar day starting at `dayStart`. */
+export function atMinuteOfDay(dayStart, minutes) {
+  const d = new Date(dayStart);
+  d.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Which day a picked time of day most likely means: the newest of `days` (newest first) where that
+ * time has already happened and falls after `after`. Picking 11:00 PM at 12:30 AM means last night.
+ */
+export function pickDay(days, minutes, now, after = -Infinity) {
+  for (const ds of days) {
+    const t = atMinuteOfDay(ds, minutes);
+    if (t <= now && t > after) return ds;
+  }
+  return days[0];
+}
+
+/** Day starts from today back to `oldest` (inclusive), newest first, at most `max` days. */
+export function recentDays(now, oldest, max) {
+  const days = [];
+  for (let ds = startOfDay(now); ds >= startOfDay(oldest) && days.length < max; ds = addDays(ds, -1)) days.push(ds);
+  return days;
+}
