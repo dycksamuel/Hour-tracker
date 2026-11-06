@@ -33,12 +33,23 @@ export function dayKey(t) {
 }
 
 /**
- * Worked time, counted in whole minutes from the minute you clocked in to the minute you clocked out.
+ * Worked time, counted in whole minutes from the minute you clocked in to the minute you clocked out,
+ * minus any break.
  * That way the hours always match the clock-in/out times shown (which have no seconds).
  */
 export function entryDuration(entry, now) {
+  return Math.max(0, shiftSpan(entry, now) - (entry.breakMs || 0));
+}
+
+/** Clock-in to clock-out, before any break is taken off. */
+export function shiftSpan(entry, now) {
   const end = entry.end ?? now;
   return Math.max(0, minuteFloor(end) - minuteFloor(entry.start));
+}
+
+/** "1h", "45m", "1h 30m", or '' for no break. */
+export function formatBreak(ms) {
+  return ms > 0 ? formatHours(ms, 'hm') : '';
 }
 
 const minuteFloor = (t) => Math.floor(t / 60000) * 60000;
@@ -186,7 +197,7 @@ export const ROUNDING_NOTE = 'Hours are rounded to the nearest 15 minutes.';
  * `weeks` is the output of groupByWeek (any order; exported oldest first).
  */
 export function weeksToCSV(weeks, jobsById, now, { round = false } = {}) {
-  const rows = [['Date', 'Day', 'Job', 'Clock In', 'Clock Out', 'Hours', 'Note']];
+  const rows = [['Date', 'Day', 'Job', 'Clock In', 'Clock Out', 'Break', 'Hours', 'Note']];
   const ordered = [...weeks].sort((a, b) => a.weekStart - b.weekStart);
   for (const week of ordered.map((w) => timesheet(w, now, round))) {
     for (const day of week.days) {
@@ -198,13 +209,14 @@ export function weeksToCSV(weeks, jobsById, now, { round = false } = {}) {
           jobsById[e.jobId]?.name ?? '',
           formatTime(e.start),
           e.end == null ? 'still clocked in' : formatTime(e.end),
+          formatBreak(e.breakMs),
           decimalHours(ms),
           e.note || '',
         ]);
       }
-      rows.push(['', '', '', '', `Day total (${formatDay(day.dayStart)})`, decimalHours(day.total), '']);
+      rows.push(['', '', '', '', '', `Day total (${formatDay(day.dayStart)})`, decimalHours(day.total), '']);
     }
-    rows.push(['', '', '', '', `Week total (${formatWeekRange(week.weekStart)})`, decimalHours(week.total), '']);
+    rows.push(['', '', '', '', '', `Week total (${formatWeekRange(week.weekStart)})`, decimalHours(week.total), '']);
     rows.push([]);
   }
   if (round) rows.push([ROUNDING_NOTE]);
@@ -225,7 +237,8 @@ export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = fa
       const end = e.end == null ? 'now' : formatTime(e.end);
       const job = showJob ? `  [${jobsById[e.jobId]?.name ?? ''}]` : '';
       const note = e.note ? `  – ${e.note}` : '';
-      lines.push(`  ${formatTime(e.start)} – ${end}   ${fh(ms)}${job}${note}`);
+      const brk = e.breakMs > 0 ? ` (${formatBreak(e.breakMs)} break)` : '';
+      lines.push(`  ${formatTime(e.start)} – ${end}   ${fh(ms)}${brk}${job}${note}`);
     }
   }
   lines.push('');

@@ -212,9 +212,9 @@ async function seededFlow(browser, colorScheme) {
     const csv = fs.readFileSync(await download.path(), 'utf8');
     fs.writeFileSync(path.join(SHOTS, 'sample-week.csv'), csv);
     // Exports round each shift to the nearest 15 minutes (on by default)
-    assert.match(csv, /2026-11-03,Tue,Church,6:01 PM,8:35 PM,2.5,Youth night/);
-    assert.match(csv, /2026-11-04,Wed,Church,9:33 AM,10:29 AM,1,/);
-    assert.match(csv, /,,,,Day total \(Tue Nov 3\),9.75,/);
+    assert.match(csv, /2026-11-03,Tue,Church,6:01 PM,8:35 PM,,2.5,Youth night/);
+    assert.match(csv, /2026-11-04,Wed,Church,9:33 AM,10:29 AM,,1,/);
+    assert.match(csv, /,,,,,Day total \(Tue Nov 3\),9.75,/);
     assert.match(csv, /Week total \(Nov 2 – Nov 8, 2026\)",22.75,/);
     assert.match(csv, /Hours are rounded to the nearest 15 minutes\./);
     assert.equal(await page.locator('.export-note .rounded-total').textContent(), '22.75h');
@@ -248,7 +248,7 @@ async function seededFlow(browser, colorScheme) {
     await page.locator('input[data-action="round-toggle"]').click();
     const [exact] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Export all shifts/ }).click()]);
     const exactCsv = fs.readFileSync(await exact.path(), 'utf8');
-    assert.match(exactCsv, /6:01 PM,8:35 PM,2.57,Youth night/);
+    assert.match(exactCsv, /6:01 PM,8:35 PM,,2.57,Youth night/);
     assert.doesNotMatch(exactCsv, /rounded/);
     await page.locator('input[data-action="round-toggle"]').click();
 
@@ -368,6 +368,99 @@ async function pickerFlow(browser) {
   console.log('✓ clock in/out at a different time: wheel, auto day, validation, overlap, overnight');
 }
 
+async function breakFlow(browser) {
+  const context = await browser.newContext({ ...phone, acceptDownloads: true });
+  const page = await context.newPage();
+  const errors = [];
+  watchErrors(page, errors);
+  await page.clock.install({ time: at(2026, 11, 5, 9, 0) });
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('hourtracker.v1')) {
+      localStorage.setItem('hourtracker.v1', JSON.stringify({ version: 1, jobs: [{ id: 'church', name: 'Church', color: '#2f7cf6', createdAt: 1 }], entries: [], settings: {} }));
+    }
+  });
+  await page.goto(url);
+  const summary = page.locator('#sheet-root .picker-summary');
+  const confirm = page.locator('#sheet-root .confirm');
+
+  // Clock in at 9:00, add a break at noon (defaults to 1 hour)
+  await page.getByRole('button', { name: 'Clock In Now', exact: true }).click();
+  await page.clock.setSystemTime(at(2026, 11, 5, 12, 0));
+  await page.getByRole('button', { name: 'Add break', exact: true }).click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  await page.waitForFunction(() => document.querySelector('#sheet-root .confirm')?.textContent);
+  assert.equal(await confirm.textContent(), 'Save 1h break');
+  assert.equal(await summary.textContent(), 'Worked so far: 2h after the break');
+  await shot(page, '13-add-break');
+  // 5-minute steps: 45 min
+  await setWheel(page, 'bh', 0);
+  await setWheel(page, 'bm', 9);
+  assert.equal(await confirm.textContent(), 'Save 45m break');
+  await setWheel(page, 'bh', 1);
+  await setWheel(page, 'bm', 0);
+  await confirm.click();
+  assert.match(await page.locator('#toast').textContent(), /1h break saved/);
+  await page.clock.runFor(1500);
+  assert.match(await page.locator('.timer').textContent(), /^2:00:0\d$/);
+  assert.match(await page.locator('.since').textContent(), /1h break taken off/);
+  assert.equal(await page.locator('.stats b').first().textContent(), '2h');
+  assert.equal(await page.getByRole('button', { name: 'Break: 1h' }).count(), 1);
+  await shot(page, '14-on-clock-with-break');
+
+  // Clock out at 5:56 PM: 8h 56m minus 1h = 7.93h; no "Add break" since one is already logged
+  await page.clock.setSystemTime(at(2026, 11, 5, 17, 56));
+  await page.getByRole('button', { name: 'Clock Out Now', exact: true }).click();
+  assert.match(await page.locator('#toast').textContent(), /Clocked out at 5:56 PM · 7.93h/);
+  assert.equal(await page.locator('#toast [data-action="add-break"]').count(), 0);
+  const row = page.locator('.card.list .row').first();
+  assert.match(await row.textContent(), /1h break/);
+
+  // Change it to 30 minutes from the shift's edit screen
+  await row.click();
+  await page.locator('select[name="breakMin"]').selectOption('30');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  assert.match(await row.textContent(), /30m break[\s\S]*8.43h/);
+
+  // Evening shift with no break: the clock-out message offers "Add break"
+  await page.clock.setSystemTime(at(2026, 11, 5, 18, 30));
+  await page.getByRole('button', { name: 'Clock In Now', exact: true }).click();
+  await page.clock.setSystemTime(at(2026, 11, 5, 20, 30));
+  await page.getByRole('button', { name: 'Clock Out Now', exact: true }).click();
+  await shot(page, '15-clock-out-add-break');
+  await page.locator('#toast [data-action="add-break"]').click();
+  await page.locator('#sheet-root.open .wheel').waitFor();
+  // A break as long as the shift is refused
+  await setWheel(page, 'bh', 2);
+  await setWheel(page, 'bm', 0);
+  assert.equal(await summary.textContent(), "That's as long as the whole shift.");
+  assert.equal(await confirm.isDisabled(), true);
+  await setWheel(page, 'bh', 0);
+  await setWheel(page, 'bm', 3);
+  assert.equal(await summary.textContent(), 'Worked: 1.75h after the break');
+  await confirm.click();
+  assert.match(await page.locator('.card.list .row').nth(1).textContent(), /15m break[\s\S]*1.75h/);
+
+  // Remove a break
+  await page.locator('.card.list .row').nth(1).click();
+  await page.locator('select[name="breakMin"]').selectOption('0');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  assert.match(await page.locator('.card.list .row').nth(1).textContent(), /2h/);
+
+  // Export shows the break column and rounds after the break
+  await page.locator('.tabbar [data-tab="weeks"]').click();
+  await page.locator('[data-action="open-week"]').first().click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Spreadsheet (CSV)' }).click()]);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  assert.match(csv, /Date,Day,Job,Clock In,Clock Out,Break,Hours,Note/);
+  assert.match(csv, /2026-11-05,Thu,Church,9:00 AM,5:56 PM,30m,8.5,/); // 8h 26m -> 8.5
+  assert.match(csv, /2026-11-05,Thu,Church,6:30 PM,8:30 PM,,2,/);
+  assert.match(csv, /Day total \(Thu Nov 5\),10.5,/);
+
+  assert.deepEqual(errors, []);
+  await context.close();
+  console.log('✓ breaks: add during shift, after clock-out, edit, remove, validation, export');
+}
+
 (async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
   const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', ROOT], { stdio: 'ignore' });
@@ -377,6 +470,7 @@ async function pickerFlow(browser) {
     const browser = await chromium.launch();
     await freshFlow(browser);
     await pickerFlow(browser);
+    await breakFlow(browser);
     await seededFlow(browser, 'light');
     await seededFlow(browser, 'dark');
     await browser.close();

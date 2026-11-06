@@ -76,20 +76,20 @@ test('totals for a range', () => {
 test('CSV export has shifts, day totals and week totals, properly quoted', () => {
   const csv = weeksToCSV(groupByWeek(entries, at(2026, 11, 10)), jobs, at(2026, 11, 10));
   const lines = csv.replace(/^﻿/, '').trim().split('\r\n');
-  assert.equal(lines[0], 'Date,Day,Job,Clock In,Clock Out,Hours,Note');
+  assert.equal(lines[0], 'Date,Day,Job,Clock In,Clock Out,Break,Hours,Note');
   // oldest week first
-  assert.equal(lines[1], '2026-10-30,Fri,Church,9:00 AM,12:30 PM,3.5,');
-  assert.ok(lines.includes('2026-11-02,Mon,Church,9:06 AM,4:21 PM,7.25,'));
-  assert.ok(lines.includes('2026-11-03,Tue,Church,6:01 PM,8:35 PM,2.57,"Youth ""night"""'));
-  assert.ok(lines.includes('2026-11-08,Sun,"Cafe, Downtown",10:00 PM,2:00 AM,4,'));
-  assert.ok(lines.includes(',,,,Day total (Tue Nov 3),9.82,'));
-  assert.ok(lines.some((l) => l.startsWith(',,,,"Week total (Nov 2 – Nov 8, 2026)",21.07,')));
+  assert.equal(lines[1], '2026-10-30,Fri,Church,9:00 AM,12:30 PM,,3.5,');
+  assert.ok(lines.includes('2026-11-02,Mon,Church,9:06 AM,4:21 PM,,7.25,'));
+  assert.ok(lines.includes('2026-11-03,Tue,Church,6:01 PM,8:35 PM,,2.57,"Youth ""night"""'));
+  assert.ok(lines.includes('2026-11-08,Sun,"Cafe, Downtown",10:00 PM,2:00 AM,,4,'));
+  assert.ok(lines.includes(',,,,,Day total (Tue Nov 3),9.82,'));
+  assert.ok(lines.some((l) => l.startsWith(',,,,,"Week total (Nov 2 – Nov 8, 2026)",21.07,')));
   assert.ok(csv.startsWith('﻿'));
 });
 
 test('CSV marks a shift that is still running', () => {
   const csv = weeksToCSV(groupByWeek([{ id: 'x', jobId: 'a', start: at(2026, 11, 5, 9, 7), end: null }], 0), jobs, at(2026, 11, 5, 10, 22));
-  assert.match(csv, /9:07 AM,still clocked in,1\.25,/);
+  assert.match(csv, /9:07 AM,still clocked in,,1\.25,/);
 });
 
 test('text summary', () => {
@@ -182,12 +182,42 @@ test('rounded timesheet: each shift rounds and the totals add up', () => {
   assert.equal(decimalHours(sheet.total), '21'); // 7.25 + 9.75 + 4
 
   const csv = weeksToCSV([week], jobs, at(2026, 11, 10), { round: true });
-  assert.ok(csv.includes('2026-11-03,Tue,Church,6:01 PM,8:35 PM,2.5,"Youth ""night"""'));
-  assert.ok(csv.includes(',,,,Day total (Tue Nov 3),9.75,'));
+  assert.ok(csv.includes('2026-11-03,Tue,Church,6:01 PM,8:35 PM,,2.5,"Youth ""night"""'));
+  assert.ok(csv.includes(',,,,,Day total (Tue Nov 3),9.75,'));
   assert.ok(csv.includes('"Week total (Nov 2 – Nov 8, 2026)",21,'));
   assert.ok(csv.includes('Hours are rounded to the nearest 15 minutes.'));
 
   const text = weekToText(week, jobs, { now: at(2026, 11, 10), round: true });
   assert.match(text, /6:01 PM – 8:35 PM {3}2\.5h/);
   assert.match(text, /Week total: 21h\n\(Hours are rounded to the nearest 15 minutes\.\)$/);
+});
+
+import { shiftSpan, formatBreak } from '../docs/js/logic.js';
+
+test('breaks come off the shift, then rounding applies', () => {
+  const m = 60000;
+  // 9:00 -> 5:56 with a 1h break: 7h 56m worked, rounds to 8h
+  const e = { id: 'b', jobId: 'a', start: at(2026, 11, 2, 9, 0), end: at(2026, 11, 2, 17, 56), breakMs: 60 * m, note: '' };
+  assert.equal(shiftSpan(e), 8 * H + 56 * m);
+  assert.equal(entryDuration(e), 7 * H + 56 * m);
+  assert.equal(formatBreak(e.breakMs), '1h');
+  assert.equal(formatBreak(45 * m), '45m');
+  assert.equal(formatBreak(0), '');
+  // a break longer than the shift never goes negative
+  assert.equal(entryDuration({ ...e, breakMs: 10 * H }), 0);
+  // running shift: break comes off the time so far
+  assert.equal(entryDuration({ start: at(2026, 11, 5, 9, 0), end: null, breakMs: 30 * m }, at(2026, 11, 5, 12, 0)), 2.5 * H);
+
+  const week = groupByWeek([e], 0)[0];
+  const csv = weeksToCSV([week], jobs, 0, { round: true });
+  assert.ok(csv.includes('2026-11-02,Mon,Church,9:00 AM,5:56 PM,1h,8,'));
+  assert.ok(csv.includes(',,,,,Day total (Mon Nov 2),8,'));
+  const text = weekToText(week, jobs, { now: 0, round: true });
+  assert.match(text, /9:00 AM – 5:56 PM {3}8h \(1h break\)/);
+});
+
+test('store keeps breaks in whole minutes', () => {
+  const s = normalize({ jobs: [{ id: 'a', name: 'X' }], entries: [{ id: '1', jobId: 'a', start: 5, end: 10, breakMs: 3600000 }, { id: '2', jobId: 'a', start: 5 }] });
+  assert.equal(s.entries[0].breakMs, 3600000);
+  assert.equal(s.entries[1].breakMs, 0);
 });

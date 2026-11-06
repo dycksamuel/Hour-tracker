@@ -595,3 +595,11 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .picker .sheet-actions { grid-template-columns: 1fr 1.9fr; }
 .picker .confirm { white-space: nowrap; }
+
+.card-links { display: flex; justify-content: center; gap: 22px; flex-wrap: wrap; }
+.card-links .link-btn { padding-top: 12px; }
+.wheel.two { grid-template-columns: 1fr 1fr; max-width: 300px; margin: 0 auto; width: 100%; }
+.break-sheet .confirm { background: var(--accent); white-space: nowrap; }
+.break-sheet .sheet-actions { grid-template-columns: 1fr 1.6fr; }
+#toast.stacked { flex-direction: column; align-items: stretch; gap: 6px; width: min(360px, calc(100% - 32px)); }
+.toast-actions { display: flex; justify-content: flex-end; gap: 18px; }

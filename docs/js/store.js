@@ -8,7 +8,7 @@ export function emptyState() {
   return {
     version: 1,
     jobs: [], // { id, name, color, createdAt }
-    entries: [], // { id, jobId, start, end|null, note }
+    entries: [], // { id, jobId, start, end|null, note, breakMs }
     settings: { hoursFormat: 'decimal', badge: false, roundExports: true },
   };
 }
@@ -41,6 +41,7 @@ export function normalize(raw) {
       start: Number(e.start),
       end: e.end == null ? null : Number(e.end),
       note: typeof e.note === 'string' ? e.note : '',
+      breakMs: Number(e.breakMs) > 0 ? Math.round(Number(e.breakMs) / 60000) * 60000 : 0,
     }));
   return { version: 1, jobs, entries, settings: { ...base.settings, ...(raw.settings || {}) } };
 }

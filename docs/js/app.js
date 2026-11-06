@@ -5,6 +5,8 @@ import {
   recentDays,
   dayKey,
   entryDuration,
+  formatBreak,
+  shiftSpan,
   formatDay,
   formatElapsed,
   formatHours,
@@ -23,7 +25,7 @@ import {
 } from './logic.js';
 import { JOB_COLORS, load, normalize, save, uid } from './store.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const LONG_SHIFT_MS = 12 * 3600000;
 
 let state = load();
@@ -97,11 +99,14 @@ function clockOut(jobId) {
     s.entries.find((e) => e.id === id).end = t;
   });
   const done = state.entries.find((e) => e.id === id);
-  showToast(`Clocked out at ${formatTime(t)} · ${fh(entryDuration(done, t))}`, () =>
-    commit((s) => {
-      const e = s.entries.find((x) => x.id === id);
-      if (e) e.end = null;
-    }),
+  showToast(
+    `Clocked out at ${formatTime(t)} · ${fh(entryDuration(done, t))}`,
+    () =>
+      commit((s) => {
+        const e = s.entries.find((x) => x.id === id);
+        if (e) e.end = null;
+      }),
+    done.breakMs ? null : id,
   );
 }
 
@@ -145,8 +150,8 @@ function renderClock() {
         </div>
         ${
           a
-            ? `<div class="timer" data-elapsed="${a.start}">${formatElapsed(t - a.start)}</div>
-               <div class="since">since ${formatTime(a.start)}${otherDay ? ` on ${formatDay(a.start)}` : ''}</div>`
+            ? `<div class="timer" data-elapsed="${a.start}" data-break="${a.breakMs || 0}">${formatElapsed(t - a.start - (a.breakMs || 0))}</div>
+               <div class="since">since ${formatTime(a.start)}${otherDay ? ` on ${formatDay(a.start)}` : ''}${a.breakMs ? ` · ${formatBreak(a.breakMs)} break taken off` : ''}</div>`
             : `<div class="timer idle">0:00:00</div><div class="since">Off the clock</div>`
         }
         ${
@@ -165,7 +170,10 @@ function renderClock() {
         </div>
         ${
           a
-            ? `<button class="link-btn center" data-action="edit-entry" data-id="${a.id}">Change clock-in time</button>`
+            ? `<div class="card-links">
+                 <button class="link-btn" data-action="add-break" data-id="${a.id}">${a.breakMs ? `Break: ${formatBreak(a.breakMs)}` : 'Add break'}</button>
+                 <button class="link-btn" data-action="edit-entry" data-id="${a.id}">Change clock-in time</button>
+               </div>`
             : ''
         }
         <div class="stats">
@@ -194,7 +202,7 @@ function entryRow(e) {
   return `<button class="row" data-action="edit-entry" data-id="${e.id}">
     <span class="row-main">
       <span class="row-title">${multiJob() ? dotFor(e.jobId) : ''}${esc(formatTime(e.start))} – ${end}${crossesMidnight ? ' <small>(next day)</small>' : ''}</span>
-      ${e.note ? `<span class="row-sub">${esc(e.note)}</span>` : ''}
+      ${e.note || e.breakMs ? `<span class="row-sub">${esc([e.breakMs ? `${formatBreak(e.breakMs)} break` : '', e.note].filter(Boolean).join(' · '))}</span>` : ''}
     </span>
     <span class="row-value" ${e.end == null ? `data-dur="${e.id}"` : ''}>${fh(entryDuration(e, t))}</span>
     <span class="chev" aria-hidden="true"></span>
@@ -429,7 +437,7 @@ function tick() {
   }
   if (!state.entries.some((e) => e.end == null)) return;
   document.querySelectorAll('[data-elapsed]').forEach((el) => {
-    el.textContent = formatElapsed(t - Number(el.dataset.elapsed));
+    el.textContent = formatElapsed(t - Number(el.dataset.elapsed) - Number(el.dataset.break || 0));
   });
   document.querySelectorAll('[data-total]').forEach((el) => {
     const [jobId, from, to] = el.dataset.total.split('|');
@@ -454,6 +462,7 @@ function openSheet(html) {
 
 function closeSheet() {
   picker = null;
+  breakSheet = null;
   const root = $('#sheet-root');
   root.classList.remove('open');
   sheetOpen = false;
@@ -495,6 +504,7 @@ function openEntrySheet(entryId, weekStart) {
       <label>Clock in<input type="datetime-local" name="start" value="${toDateTimeLocal(start)}" required></label>
       ${active ? `<label class="check"><input type="checkbox" name="active" checked> Still clocked in</label>` : ''}
       <label class="end-field" ${active ? 'hidden' : ''}>Clock out<input type="datetime-local" name="end" value="${toDateTimeLocal(end)}"></label>
+      <label>Break<select name="breakMin">${breakOptions(e?.breakMs || 0)}</select></label>
       <label>Note<input name="note" maxlength="200" placeholder="Optional" value="${esc(e?.note || '')}" autocomplete="off"></label>
       <p class="form-error" hidden></p>
       <div class="sheet-actions">
@@ -602,7 +612,10 @@ function updatePicker() {
   let summary;
   if (error) summary = error;
   else if (picker.mode === 'in') summary = `Clocking in at ${formatTime(at)} ${when} · ${formatHours(entryDuration({ start: at, end: t }), 'hm')} ago`;
-  else summary = `Shift: ${formatTime(picker.after)} – ${formatTime(at)} ${when} · ${fh(entryDuration({ start: picker.after, end: at }))}`;
+  else {
+    const brk = state.entries.find((x) => x.id === picker.entryId)?.breakMs || 0;
+    summary = `Shift: ${formatTime(picker.after)} – ${formatTime(at)} ${when} · ${fh(entryDuration({ start: picker.after, end: at, breakMs: brk }))}${brk ? ` after ${formatBreak(brk)} break` : ''}`;
+  }
   const sum = $('#sheet-root .picker-summary');
   sum.textContent = summary;
   sum.classList.toggle('error', !!error);
@@ -633,11 +646,14 @@ function confirmClockAt() {
     commit((s) => {
       s.entries.find((x) => x.id === entryId).end = at;
     });
-    showToast(`Clocked out at ${formatTime(at)} · ${fh(entryDuration({ start: e.start, end: at }))}`, () =>
-      commit((s) => {
-        const x = s.entries.find((y) => y.id === entryId);
-        if (x) x.end = null;
-      }),
+    showToast(
+      `Clocked out at ${formatTime(at)} · ${fh(entryDuration({ ...e, end: at }))}`,
+      () =>
+        commit((s) => {
+          const x = s.entries.find((y) => y.id === entryId);
+          if (x) x.end = null;
+        }),
+      e.breakMs ? null : entryId,
     );
   }
 }
@@ -647,6 +663,99 @@ document.addEventListener(
   'scroll',
   (ev) => {
     if (picker && ev.target.classList?.contains('wheel-col')) updatePicker();
+  },
+  true,
+);
+
+// ---------- breaks ----------
+
+const BREAK_HOURS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const BREAK_MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
+let breakSheet = null; // { entryId }
+
+/** <option>s for the Break field: none, then 5-minute steps up to 4 hours (a wheel on iPhone). */
+function breakOptions(currentMs) {
+  const cur = Math.round(currentMs / 60000);
+  const mins = Array.from({ length: 49 }, (_, i) => i * 5);
+  if (cur && !mins.includes(cur)) mins.push(cur);
+  return mins
+    .sort((a, b) => a - b)
+    .map((m) => `<option value="${m}" ${m === cur ? 'selected' : ''}>${m ? formatBreak(m * 60000) : 'No break'}</option>`)
+    .join('');
+}
+
+function openBreakSheet(entryId) {
+  const e = state.entries.find((x) => x.id === entryId);
+  if (!e) return;
+  const mins = e.breakMs ? Math.round(e.breakMs / 60000) : 60; // most breaks are an hour
+  const h = Math.min(8, Math.floor(mins / 60));
+  const m = Math.round((mins % 60) / 5) % 12;
+  breakSheet = { entryId };
+  openSheet(`<form data-form="break" data-id="${esc(e.id)}" class="stack picker break-sheet">
+      <h2>${e.breakMs ? 'Change break' : 'Add a break'}</h2>
+      <p class="picker-hint">How long was your break? It's taken off this shift (${esc(formatTime(e.start))} – ${e.end == null ? 'now' : esc(formatTime(e.end))}).</p>
+      <div class="wheel two">
+        <div class="wheel-band" aria-hidden="true"></div>
+        ${wheelColumn('bh', BREAK_HOURS.map((x) => `${x} hr`), h)}
+        ${wheelColumn('bm', BREAK_MINUTES.map((x) => `${String(x).padStart(2, '0')} min`), m)}
+      </div>
+      <p class="picker-summary" aria-live="polite"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn" data-action="close-sheet">Cancel</button>
+        <button type="submit" class="btn primary confirm"></button>
+      </div>
+      ${e.breakMs ? `<button type="button" class="link-btn danger center" data-action="remove-break" data-id="${esc(e.id)}">Remove break</button>` : ''}
+    </form>`);
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#sheet-root .wheel-col').forEach((col) => {
+      col.scrollTop = Number(col.querySelector('.sel').dataset.index) * WHEEL_ITEM;
+    });
+    updateBreakSheet();
+  });
+}
+
+function breakResult() {
+  const e = state.entries.find((x) => x.id === breakSheet.entryId);
+  const ms = (BREAK_HOURS[readWheel('bh')] * 60 + BREAK_MINUTES[readWheel('bm')]) * 60000;
+  const t = now();
+  let error = '';
+  if (e && e.end != null && ms >= shiftSpan(e, t)) error = "That's as long as the whole shift.";
+  return { e, ms, error, t };
+}
+
+function updateBreakSheet() {
+  if (!breakSheet) return;
+  const { e, ms, error, t } = breakResult();
+  if (!e) return;
+  const sum = $('#sheet-root .picker-summary');
+  const worked = entryDuration({ ...e, breakMs: ms }, t);
+  sum.textContent = error || (e.end == null ? `Worked so far: ${fh(worked)} after the break` : `Worked: ${fh(worked)} after the break`);
+  sum.classList.toggle('error', !!error);
+  const btn = $('#sheet-root .confirm');
+  btn.textContent = ms ? `Save ${formatBreak(ms)} break` : 'Save (no break)';
+  btn.disabled = !!error;
+}
+
+function saveBreak(ms, entryId) {
+  closeSheet();
+  commit((s) => {
+    const x = s.entries.find((y) => y.id === entryId);
+    if (x) x.breakMs = ms;
+  });
+  showToast(ms ? `${formatBreak(ms)} break saved` : 'Break removed');
+}
+
+function confirmBreak() {
+  if (!breakSheet) return;
+  const { e, ms, error } = breakResult();
+  if (!e || error) return;
+  saveBreak(ms, e.id);
+}
+
+document.addEventListener(
+  'scroll',
+  (ev) => {
+    if (breakSheet && ev.target.classList?.contains('wheel-col')) updateBreakSheet();
   },
   true,
 );
@@ -666,6 +775,7 @@ function saveEntry(form) {
   const start = keepSeconds(existing?.start, fromDateTimeLocal(fd.get('start')));
   const end = stillActive ? null : keepSeconds(existing?.end, fromDateTimeLocal(fd.get('end')));
   const note = String(fd.get('note') || '').trim();
+  const breakMs = Number(fd.get('breakMin') || 0) * 60000;
   const t = now();
 
   if (!jobById(jobId)) return sheetError('Pick a job.');
@@ -678,6 +788,7 @@ function saveEntry(form) {
   } else {
     if (end == null) return sheetError('Enter a clock-out time.');
     if (end <= start) return sheetError('Clock-out has to be after clock-in.');
+    if (breakMs && breakMs >= shiftSpan({ start, end })) return sheetError('The break is as long as the whole shift.');
     if (end - start > 24 * 3600000 && !confirm(`That shift is ${fh(end - start)} long. Save it anyway?`)) return;
   }
 
@@ -685,9 +796,9 @@ function saveEntry(form) {
   commit((s) => {
     if (existing) {
       const e = s.entries.find((x) => x.id === id);
-      Object.assign(e, { jobId, start, end, note });
+      Object.assign(e, { jobId, start, end, note, breakMs });
     } else {
-      s.entries.push({ id: uid(), jobId, start, end, note });
+      s.entries.push({ id: uid(), jobId, start, end, note, breakMs });
     }
   });
   showToast(existing ? 'Shift updated' : 'Shift added');
@@ -809,12 +920,13 @@ function printWeek() {
             ${showJob ? `<td>${esc(jobById(e.jobId)?.name || '')}</td>` : ''}
             <td>${esc(formatTime(e.start))}</td>
             <td>${e.end == null ? 'still clocked in' : esc(formatTime(e.end))}</td>
+            <td>${esc(formatBreak(e.breakMs))}</td>
             <td class="num">${fh(ms)}</td>
             <td>${esc(e.note || '')}</td>
           </tr>`,
         )
         .join('');
-      return `${shiftRows}<tr class="day-total"><td colspan="${showJob ? 4 : 3}"></td><td class="num">${fh(d.total)}</td><td>Day total</td></tr>`;
+      return `${shiftRows}<tr class="day-total"><td colspan="${showJob ? 5 : 4}"></td><td class="num">${fh(d.total)}</td><td>Day total</td></tr>`;
     })
     .join('');
   const byJob =
@@ -825,8 +937,8 @@ function printWeek() {
     <h1>${title ? `${esc(title)} — ` : ''}Hours</h1>
     <h2>Week of ${esc(formatWeekRange(week.weekStart))}</h2>
     <table>
-      <thead><tr><th>Day</th>${showJob ? '<th>Job</th>' : ''}<th>Clock in</th><th>Clock out</th><th class="num">Hours</th><th>Note</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="${showJob ? 6 : 5}">No shifts this week.</td></tr>`}</tbody>
+      <thead><tr><th>Day</th>${showJob ? '<th>Job</th>' : ''}<th>Clock in</th><th>Clock out</th><th>Break</th><th class="num">Hours</th><th>Note</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="${showJob ? 7 : 6}">No shifts this week.</td></tr>`}</tbody>
     </table>
     ${byJob}
     <p class="week-total">Week total: <b>${fh(week.total)}</b></p>
@@ -893,13 +1005,19 @@ async function toggleBadge(input) {
 
 // ---------- toast ----------
 
-function showToast(msg, undo) {
+function showToast(msg, undo, breakEntryId) {
   const el = $('#toast');
   clearTimeout(toastTimer);
   undoAction = undo || null;
-  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button data-action="undo">Undo</button>' : ''}`;
+  const buttons = `${breakEntryId ? `<button data-action="add-break" data-id="${esc(breakEntryId)}">Add break</button>` : ''}${
+    undo ? '<button data-action="undo">Undo</button>' : ''
+  }`;
+  el.classList.toggle('stacked', !!breakEntryId);
+  el.innerHTML = breakEntryId
+    ? `<span>${esc(msg)}</span><div class="toast-actions">${buttons}</div>`
+    : `<span>${esc(msg)}</span>${buttons}`;
   el.classList.add('show');
-  toastTimer = setTimeout(hideToast, undo ? 6000 : 2500);
+  toastTimer = setTimeout(hideToast, breakEntryId ? 9000 : undo ? 6000 : 2500);
 }
 
 function hideToast() {
@@ -929,6 +1047,11 @@ document.addEventListener('click', (ev) => {
       return clockOut(el.dataset.job);
     case 'clock-in-at':
       return openClockAt('in', el.dataset.job);
+    case 'add-break':
+      hideToast();
+      return openBreakSheet(el.dataset.id);
+    case 'remove-break':
+      return saveBreak(0, el.dataset.id);
     case 'clock-out-at':
       return openClockAt('out', el.dataset.job);
     case 'wheel-pick': {
@@ -1048,6 +1171,8 @@ document.addEventListener('submit', (ev) => {
       return saveJob(form);
     case 'clock-at':
       return confirmClockAt();
+    case 'break':
+      return confirmBreak();
   }
 });
 

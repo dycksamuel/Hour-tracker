@@ -6,6 +6,7 @@
 
 - **One-tap Clock In / Clock Out.** It records the exact time and today's date. Undo is available for a few seconds in case you tap by mistake.
 - **Clock In At… / Clock Out At…** for when you forgot. A scroll wheel opens on the current time, so you only scroll back to when you actually started or left. It works out the day (11 PM picked just after midnight means last night) and won't accept a time that hasn't happened yet, a clock-out before the clock-in, or a clock-in that overlaps your last shift.
+- **Optional breaks.** Tap **Add break** while on the clock, or right after clocking out, and pick the length on a wheel (5-minute steps, starts at 1 hour). You can also set or change a break when editing a shift. Breaks come off the shift's hours everywhere, and exports show them in a Break column (rounding applies after the break).
 - **A live timer and totals** for today and this week while you're on the clock. A warning appears if you've been clocked in for more than 12 hours.
 - **Pay periods run Monday to Sunday.** Each week lists every shift (start – end), a total for each day and the week total. A shift that runs past midnight counts toward the day you clocked in.
 - **Up to a few jobs** (for example Church and a second job), each with its own color and clock. Pay Periods can show all jobs or one at a time.
