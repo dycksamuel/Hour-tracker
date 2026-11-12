@@ -185,7 +185,7 @@ test('rounded timesheet: each shift rounds and the totals add up', () => {
   assert.ok(csv.includes('2026-11-03,Tue,Church,6:01 PM,8:35 PM,,2.5,"Youth ""night"""'));
   assert.ok(csv.includes(',,,,,Day total (Tue Nov 3),9.75,'));
   assert.ok(csv.includes('"Week total (Nov 2 – Nov 8, 2026)",21,'));
-  assert.ok(csv.includes('Hours are rounded to the nearest 15 minutes.'));
+  assert.ok(!csv.includes('rounded')); // no rounding note in the spreadsheet
 
   const text = weekToText(week, jobs, { now: at(2026, 11, 10), round: true });
   assert.match(text, /6:01 PM – 8:35 PM {3}2\.5h/);
@@ -238,4 +238,10 @@ test('mailto link carries recipients, subject and a multi-line body', () => {
   assert.equal(params.get('subject'), 'Church hours — week of Nov 2 – Nov 8, 2026');
   assert.equal(params.get('body'), 'Mon Nov 2  (7.25h)\r\n  9:06 AM – 4:21 PM   7.25h\r\n\r\nWeek total: 7.25h');
   assert.ok(!url.includes(' '));
+});
+
+test('text summary can leave out the rounding note', () => {
+  const [week] = groupByWeek(entries, at(2026, 11, 10));
+  const text = weekToText(week, jobs, { now: at(2026, 11, 10), round: true, roundingNote: false });
+  assert.match(text, /Week total: 21h$/);
 });

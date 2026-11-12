@@ -22,12 +22,11 @@ import {
   totalBetween,
   weeksToCSV,
   timesheet,
-  ROUNDING_NOTE,
   weekToText,
 } from './logic.js';
 import { JOB_COLORS, load, normalize, save, uid } from './store.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 const LONG_SHIFT_MS = 12 * 3600000;
 
 let state = load();
@@ -893,8 +892,9 @@ function fileStem(weekStart) {
   return `hours-${slug}week-of-${dayKey(weekStart)}`;
 }
 
-function weekText(week, t) {
+function weekText(week, t, { roundingNote = true } = {}) {
   return weekToText(week, jobsById(), {
+    roundingNote,
     now: t,
     mode: state.settings.hoursFormat,
     showJob: multiJob() && ui.weekFilter === 'all',
@@ -915,7 +915,7 @@ function emailWeek() {
   const job = exportTitle();
   const subject = `${job ? `${job} hours` : 'Hours'} — week of ${formatWeekRange(week.weekStart)}`;
   const a = document.createElement('a');
-  a.href = mailtoLink(to, subject, weekText(week, t));
+  a.href = mailtoLink(to, subject, weekText(week, t, { roundingNote: false }));
   a.click();
 }
 
@@ -1008,7 +1008,6 @@ function printWeek() {
     </table>
     ${byJob}
     <p class="week-total">Week total: <b>${fh(week.total)}</b></p>
-    ${round ? `<p class="rounding-note">${ROUNDING_NOTE}</p>` : ''}
   </div>`;
   window.print();
 }

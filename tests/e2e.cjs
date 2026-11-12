@@ -216,7 +216,7 @@ async function seededFlow(browser, colorScheme) {
     assert.match(csv, /2026-11-04,Wed,Church,9:33 AM,10:29 AM,,1,/);
     assert.match(csv, /,,,,,Day total \(Tue Nov 3\),9.75,/);
     assert.match(csv, /Week total \(Nov 2 – Nov 8, 2026\)",22.75,/);
-    assert.match(csv, /Hours are rounded to the nearest 15 minutes\./);
+    assert.doesNotMatch(csv, /rounded/); // no rounding note in the spreadsheet
     assert.equal(await page.locator('.export-note .rounded-total').textContent(), '22.75h');
 
     // Print view renders the report
@@ -225,6 +225,7 @@ async function seededFlow(browser, colorScheme) {
     });
     await page.getByRole('button', { name: 'Print / PDF' }).click();
     assert.match(await page.locator('#print-root').textContent(), /Week total: 22.75h/);
+    assert.doesNotMatch(await page.locator('#print-root').textContent(), /rounded/);
     await page.emulateMedia({ media: 'print' });
     await page.pdf({ path: path.join(SHOTS, 'sample-week.pdf'), format: 'Letter', margin: { top: '0.6in', bottom: '0.6in', left: '0.6in', right: '0.6in' } }).catch(() => {});
     await page.emulateMedia({ media: 'screen' });
@@ -479,7 +480,8 @@ async function breakFlow(browser) {
   const body = params.get('body');
   assert.match(body, /^Church — Nov 2 – Nov 8, 2026/);
   assert.match(body, /9:00 AM – 5:56 PM {3}8.5h \(30m break\)/);
-  assert.match(body, /Week total: 10.5h\r\n\(Hours are rounded to the nearest 15 minutes.\)$/);
+  assert.match(body, /Week total: 10.5h$/); // no rounding note in the email
+  assert.doesNotMatch(body, /rounded/);
   // After setup it's one tap, and the addresses show under the button
   assert.match(await page.locator('.email-to').textContent(), /To: me@example.com, office@example.com/);
   await page.locator('.export').scrollIntoViewIfNeeded();

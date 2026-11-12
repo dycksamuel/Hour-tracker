@@ -591,7 +591,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   .report .num { text-align: right; font-variant-numeric: tabular-nums; }
   .report .day-total td { font-weight: 700; border-bottom: 1pt solid #000; }
   .report .week-total { font-size: 15pt; margin-top: 14pt; }
-  .report .rounding-note { font-size: 10pt; color: #555; }
 }
 .picker .sheet-actions { grid-template-columns: 1fr 1.9fr; }
 .picker .confirm { white-space: nowrap; }

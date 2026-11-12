@@ -219,13 +219,12 @@ export function weeksToCSV(weeks, jobsById, now, { round = false } = {}) {
     rows.push(['', '', '', '', '', `Week total (${formatWeekRange(week.weekStart)})`, decimalHours(week.total), '']);
     rows.push([]);
   }
-  if (round) rows.push([ROUNDING_NOTE]);
   // Leading BOM so Excel opens the file as UTF-8.
   return '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
 /** Plain-text summary for pasting into a message or email. */
-export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = false, title = '', round = false } = {}) {
+export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = false, title = '', round = false, roundingNote = true } = {}) {
   const fh = (ms) => formatHours(ms, mode);
   const sheet = timesheet(week, now, round);
   const lines = [];
@@ -248,7 +247,7 @@ export function weekToText(week, jobsById, { now, mode = 'decimal', showJob = fa
     }
   }
   lines.push(`Week total: ${fh(sheet.total)}`);
-  if (round) lines.push(`(${ROUNDING_NOTE})`);
+  if (round && roundingNote) lines.push(`(${ROUNDING_NOTE})`);
   return lines.join('\n');
 }
 
