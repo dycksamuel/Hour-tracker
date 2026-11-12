@@ -221,3 +221,21 @@ test('store keeps breaks in whole minutes', () => {
   assert.equal(s.entries[0].breakMs, 3600000);
   assert.equal(s.entries[1].breakMs, 0);
 });
+
+import { parseEmails, mailtoLink } from '../docs/js/logic.js';
+
+test('email recipients are parsed and validated', () => {
+  assert.deepEqual(parseEmails('me@example.com, office@example.com'), { valid: ['me@example.com', 'office@example.com'], invalid: [] });
+  assert.deepEqual(parseEmails(' me@example.com;office@example.com  me@example.com '), { valid: ['me@example.com', 'office@example.com'], invalid: [] });
+  assert.deepEqual(parseEmails('me@example, ok@example.com'), { valid: ['ok@example.com'], invalid: ['me@example'] });
+  assert.deepEqual(parseEmails(''), { valid: [], invalid: [] });
+});
+
+test('mailto link carries recipients, subject and a multi-line body', () => {
+  const url = mailtoLink(['me@example.com', 'office@example.com'], 'Church hours — week of Nov 2 – Nov 8, 2026', 'Mon Nov 2  (7.25h)\n  9:06 AM – 4:21 PM   7.25h\n\nWeek total: 7.25h');
+  assert.ok(url.startsWith('mailto:me@example.com,office@example.com?subject='));
+  const params = new URLSearchParams(url.split('?')[1]);
+  assert.equal(params.get('subject'), 'Church hours — week of Nov 2 – Nov 8, 2026');
+  assert.equal(params.get('body'), 'Mon Nov 2  (7.25h)\r\n  9:06 AM – 4:21 PM   7.25h\r\n\r\nWeek total: 7.25h');
+  assert.ok(!url.includes(' '));
+});

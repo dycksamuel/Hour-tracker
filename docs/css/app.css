@@ -603,3 +603,9 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .break-sheet .sheet-actions { grid-template-columns: 1fr 1.6fr; }
 #toast.stacked { flex-direction: column; align-items: stretch; gap: 6px; width: min(360px, calc(100% - 32px)); }
 .toast-actions { display: flex; justify-content: flex-end; gap: 18px; }
+
+.email-wrap { padding: 6px 14px 4px; }
+.email-btn { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 54px; font-size: 17px; }
+.email-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.email-to { margin: 8px 4px 6px; font-size: 13px; color: var(--muted); text-align: center; overflow-wrap: anywhere; }
+.link-btn.inline { padding: 0; font-size: inherit; }

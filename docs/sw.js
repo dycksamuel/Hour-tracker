@@ -1,6 +1,6 @@
 // Offline support: the app's files are saved on the phone so it opens instantly with no signal.
 // Bump VERSION whenever any file below changes, so phones pick up the update.
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const CACHE = `hours-${VERSION}`;
 const ASSETS = [
   './',

@@ -6,6 +6,8 @@ import {
   dayKey,
   entryDuration,
   formatBreak,
+  mailtoLink,
+  parseEmails,
   shiftSpan,
   formatDay,
   formatElapsed,
@@ -25,7 +27,7 @@ import {
 } from './logic.js';
 import { JOB_COLORS, load, normalize, save, uid } from './store.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const LONG_SHIFT_MS = 12 * 3600000;
 
 let state = load();
@@ -326,6 +328,17 @@ function renderWeekDetail() {
     ${days}
     <section class="card export">
       <h3 class="list-title">Export this week</h3>
+      <div class="email-wrap">
+        <button class="btn primary block email-btn" data-action="email-week">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg>
+          Email timesheet
+        </button>
+        <p class="email-to">${
+          state.settings.emailTo
+            ? `To: ${esc(state.settings.emailTo)} · <button class="link-btn inline" data-action="edit-email">Change</button>`
+            : 'Drafts an email in your Mail app. You\'ll choose who it goes to the first time.'
+        }</p>
+      </div>
       <div class="export-grid">
         <button class="btn tinted" data-action="share-text">Share as text</button>
         <button class="btn tinted" data-action="share-csv">Spreadsheet (CSV)</button>
@@ -382,10 +395,17 @@ function renderSettings() {
       <label class="row toggle">
         <span class="row-main">
           <span class="row-title">Round to the nearest 15 minutes</span>
-          <span class="row-sub">Exports (text, CSV, PDF) round each shift's hours, so 8h 56m becomes 9h and 8h 48m becomes 8h 45m. Clock-in and clock-out times stay exact, and the app itself shows your exact hours.</span>
+          <span class="row-sub">Exports (email, text, CSV, PDF) round each shift's hours, so 8h 56m becomes 9h and 8h 48m becomes 8h 45m. Clock-in and clock-out times stay exact, and the app itself shows your exact hours.</span>
         </span>
         <input type="checkbox" class="switch" data-action="round-toggle" ${state.settings.roundExports ? 'checked' : ''}>
       </label>
+      <button class="row" data-action="edit-email">
+        <span class="row-main">
+          <span class="row-title">Email timesheet to</span>
+          <span class="row-sub">${state.settings.emailTo ? esc(state.settings.emailTo) : 'Not set up yet'}</span>
+        </span>
+        <span class="chev" aria-hidden="true"></span>
+      </button>
     </section>
 
     <h3 class="section-label">App icon</h3>
@@ -873,16 +893,62 @@ function fileStem(weekStart) {
   return `hours-${slug}week-of-${dayKey(weekStart)}`;
 }
 
-function shareWeekText() {
-  const t = now();
-  const week = currentWeekData(t);
-  const text = weekToText(week, jobsById(), {
+function weekText(week, t) {
+  return weekToText(week, jobsById(), {
     now: t,
     mode: state.settings.hoursFormat,
     showJob: multiJob() && ui.weekFilter === 'all',
     title: exportTitle(),
     round: state.settings.roundExports,
   });
+}
+
+/** Open a drafted email (To, subject and hours filled in) in the phone's mail app. */
+function emailWeek() {
+  const to = parseEmails(state.settings.emailTo).valid;
+  if (!to.length) return openEmailSheet(true);
+  const t = now();
+  const week = currentWeekData(t);
+  if (!week.days.length) return showToast('No shifts to send this week');
+  const running = week.days.some((d) => d.entries.some((e) => e.end == null));
+  if (running && !confirm("You're still clocked in. The email will count your hours up to now. Continue?")) return;
+  const job = exportTitle();
+  const subject = `${job ? `${job} hours` : 'Hours'} — week of ${formatWeekRange(week.weekStart)}`;
+  const a = document.createElement('a');
+  a.href = mailtoLink(to, subject, weekText(week, t));
+  a.click();
+}
+
+function openEmailSheet(sendAfter) {
+  openSheet(`<form data-form="email-setup" data-send="${sendAfter ? '1' : ''}" class="stack">
+      <h2>Email timesheet to</h2>
+      <p class="picker-hint">Who should get your weekly hours? Separate addresses with commas. They're saved on this phone only.</p>
+      <label>Email addresses<input name="to" type="text" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false"
+        placeholder="you@example.com, office@example.com" value="${esc(state.settings.emailTo)}"></label>
+      <p class="form-error" hidden></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn" data-action="close-sheet">Cancel</button>
+        <button type="submit" class="btn primary">${sendAfter ? 'Save & draft email' : 'Save'}</button>
+      </div>
+    </form>`);
+  requestAnimationFrame(() => $('#sheet-root input[name="to"]')?.focus());
+}
+
+function saveEmailSetup(form) {
+  const { valid, invalid } = parseEmails(new FormData(form).get('to'));
+  if (invalid.length) return sheetError(`Check this address: ${invalid[0]}`);
+  if (!valid.length && form.dataset.send) return sheetError('Enter at least one email address.');
+  closeSheet();
+  commit((s) => {
+    s.settings.emailTo = valid.join(', ');
+  });
+  if (form.dataset.send) emailWeek();
+  else showToast(valid.length ? 'Email addresses saved' : 'Email addresses cleared');
+}
+
+function shareWeekText() {
+  const t = now();
+  const text = weekText(currentWeekData(t), t);
   if (navigator.share) {
     navigator.share({ text }).catch((err) => {
       if (err.name !== 'AbortError') copyText(text);
@@ -1099,6 +1165,10 @@ document.addEventListener('click', (ev) => {
       ui.weekFilter = el.dataset.job;
       render();
       return;
+    case 'email-week':
+      return emailWeek();
+    case 'edit-email':
+      return openEmailSheet(false);
     case 'share-text':
       return shareWeekText();
     case 'share-csv':
@@ -1173,6 +1243,8 @@ document.addEventListener('submit', (ev) => {
       return confirmClockAt();
     case 'break':
       return confirmBreak();
+    case 'email-setup':
+      return saveEmailSetup(form);
   }
 });
 

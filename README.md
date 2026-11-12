@@ -11,6 +11,7 @@
 - **Pay periods run Monday to Sunday.** Each week lists every shift (start – end), a total for each day and the week total. A shift that runs past midnight counts toward the day you clocked in.
 - **Up to a few jobs** (for example Church and a second job), each with its own color and clock. Pay Periods can show all jobs or one at a time.
 - **Fix mistakes.** Change the clock-in or clock-out time, add a shift you forgot, add a note, or delete a shift.
+- **Email timesheet.** One tap on a week drafts an email in your Mail app with your recipients, subject and that week's hours (rounded, with breaks) filled in. You enter the addresses once; they're saved on your phone only, never in this repository.
 - **Export a week** as text (for Messages or email), as a CSV spreadsheet, or as a printable page or PDF. **Export everything** as CSV.
 - **Clean timesheets.** Exports round each shift to the nearest 15 minutes (8h 56m → 9h, 8h 48m → 8h 45m), and the day and week totals add up those rounded shifts. Clock-in/out times stay exact, the app itself shows exact hours, and rounding can be turned off in Settings.
 - **Back up and restore** all your data as a file (keep a copy in iCloud Drive).

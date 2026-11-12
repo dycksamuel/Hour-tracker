@@ -456,9 +456,43 @@ async function breakFlow(browser) {
   assert.match(csv, /2026-11-05,Thu,Church,6:30 PM,8:30 PM,,2,/);
   assert.match(csv, /Day total \(Thu Nov 5\),10.5,/);
 
+  // Email timesheet: first time asks for addresses, then drafts the email
+  await page.evaluate(() => {
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.href.startsWith('mailto:')) window.__mailto = this.href;
+      else click.call(this);
+    };
+  });
+  await page.getByRole('button', { name: 'Email timesheet' }).click();
+  await page.locator('#sheet-root.open input[name="to"]').fill('me@example');
+  await shot(page, '16-email-setup');
+  await page.getByRole('button', { name: 'Save & draft email' }).click();
+  assert.equal(await page.locator('.form-error').textContent(), 'Check this address: me@example');
+  await page.locator('#sheet-root input[name="to"]').fill('me@example.com, office@example.com');
+  await page.getByRole('button', { name: 'Save & draft email' }).click();
+  const mailto = await page.waitForFunction(() => window.__mailto).then((h) => h.jsonValue());
+  const [addr, query] = mailto.slice('mailto:'.length).split('?');
+  assert.equal(addr, 'me@example.com,office@example.com');
+  const params = new URLSearchParams(query);
+  assert.equal(params.get('subject'), 'Church hours — week of Nov 2 – Nov 8, 2026');
+  const body = params.get('body');
+  assert.match(body, /^Church — Nov 2 – Nov 8, 2026/);
+  assert.match(body, /9:00 AM – 5:56 PM {3}8.5h \(30m break\)/);
+  assert.match(body, /Week total: 10.5h\r\n\(Hours are rounded to the nearest 15 minutes.\)$/);
+  // After setup it's one tap, and the addresses show under the button
+  assert.match(await page.locator('.email-to').textContent(), /To: me@example.com, office@example.com/);
+  await page.locator('.export').scrollIntoViewIfNeeded();
+  await shot(page, '17-email-button');
+  await page.evaluate(() => (window.__mailto = null));
+  await page.getByRole('button', { name: 'Email timesheet' }).click();
+  assert.ok(await page.waitForFunction(() => window.__mailto?.startsWith('mailto:me@example.com,office@example.com?')));
+  await page.locator('.tabbar [data-tab="settings"]').click();
+  assert.match(await page.locator('[data-action="edit-email"]').textContent(), /me@example.com, office@example.com/);
+
   assert.deepEqual(errors, []);
   await context.close();
-  console.log('✓ breaks: add during shift, after clock-out, edit, remove, validation, export');
+  console.log('✓ breaks: add during shift, after clock-out, edit, remove, validation, export; email timesheet');
 }
 
 (async () => {

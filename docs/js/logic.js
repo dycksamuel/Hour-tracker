@@ -279,3 +279,21 @@ export function recentDays(now, oldest, max) {
   for (let ds = startOfDay(now); ds >= startOfDay(oldest) && days.length < max; ds = addDays(ds, -1)) days.push(ds);
   return days;
 }
+
+// ---------- Email timesheet ----------
+
+/** Split "a@x.com, b@y.com" (commas, semicolons or spaces) into valid and invalid addresses. */
+export function parseEmails(text) {
+  const parts = String(text || '')
+    .split(/[\s,;]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const ok = (p) => /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/.test(p);
+  return { valid: [...new Set(parts.filter(ok))], invalid: parts.filter((p) => !ok(p)) };
+}
+
+/** mailto: link that opens a drafted email in the phone's mail app. */
+export function mailtoLink(to, subject, body) {
+  const q = `subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.replace(/\r?\n/g, '\r\n'))}`;
+  return `mailto:${to.map((a) => encodeURIComponent(a).replace(/%40/g, '@')).join(',')}?${q}`;
+}
